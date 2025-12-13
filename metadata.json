@@ -1,0 +1,7 @@
+{
+  "name": "Nuance AI",
+  "description": "An AI-powered communication coach helping users master speaking, listening, and persuasion through active voice practice and structured feedback.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
