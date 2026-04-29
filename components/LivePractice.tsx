@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type } from '@google/genai';
 import { createBlob, decode, decodeAudioData } from '../services/audioUtils';
 import { Lesson, SessionResult, EvaluationMetric } from '../types';
-import { Mic, MicOff, Loader2, StopCircle, PlayCircle, BarChart3, WifiOff, Trophy, ArrowRight, Pause, X, Info, MessageSquare, RotateCcw, Settings, Gauge, Ear, Check, Volume2 } from 'lucide-react';
+import { Mic, MicOff, Loader2, StopCircle, PlayCircle, BarChart3, WifiOff, Trophy, ArrowRight, Pause, X, Info, MessageSquare, RotateCcw, Settings, Gauge, Ear, Check, Volume2, User, Sparkles } from 'lucide-react';
 import { AI_PERSONAS, SCORING_RUBRICS, SESSION_MODE_CONFIG } from '../constants';
 
 interface LivePracticeProps {
@@ -23,7 +23,7 @@ const AVAILABLE_VOICES = [
   { id: 'Zephyr', label: 'Zephyr (Bright)', desc: 'Friendly & Upbeat' },
 ];
 
-const PLAYBACK_SPEEDS = [0.75, 1.0, 1.25];
+const PLAYBACK_SPEEDS = [0.8, 1.0, 1.2, 1.5];
 
 const LivePractice: React.FC<LivePracticeProps> = ({ lesson, weekId, weekTheme, evaluationFocus, onComplete, onCancel }) => {
   const isActiveRef = useRef(false);
@@ -57,12 +57,32 @@ const LivePractice: React.FC<LivePracticeProps> = ({ lesson, weekId, weekTheme, 
   const transcriptHistoryRef = useRef<{role: 'user' | 'model', text: string}[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Sync ref with state
+  // Sync ref with state and update active sources dynamically
   useEffect(() => {
     playbackSpeedRef.current = playbackSpeed;
+    
+    // Immediately update speed of any currently playing audio
+    sourcesRef.current.forEach(source => {
+        try {
+            // Check if context is valid before setting
+            if (source.context.state === 'running') {
+                 source.playbackRate.setValueAtTime(playbackSpeed, source.context.currentTime);
+            }
+        } catch (e) {
+            console.warn("Could not update playback rate for active source", e);
+        }
+    });
   }, [playbackSpeed]);
 
   const startSession = async () => {
+    if (isConnecting || isActive) return;
+    
+    // 1. Validate API Key
+    if (!process.env.API_KEY) {
+        setError("API Key is missing. Please check your configuration.");
+        return;
+    }
+
     setIsConnecting(true);
     setError(null);
     setStatus("Initializing audio...");
@@ -73,7 +93,7 @@ const LivePractice: React.FC<LivePracticeProps> = ({ lesson, weekId, weekTheme, 
     setSessionResult(null);
 
     try {
-      // 1. Setup Audio Input
+      // 2. Setup Audio Input
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       
@@ -115,32 +135,37 @@ const LivePractice: React.FC<LivePracticeProps> = ({ lesson, weekId, weekTheme, 
             setTranscript([...transcriptHistoryRef.current]);
             
             // Start processing mic input - Optimized buffer size for lower latency (2048 vs 4096)
-            const source = inputCtx.createMediaStreamSource(stream);
-            const scriptProcessor = inputCtx.createScriptProcessor(2048, 1, 1);
-            
-            scriptProcessor.onaudioprocess = (e) => {
-              if (!isActiveRef.current) return; // Use Ref for synchronous check
-              
-              const inputData = e.inputBuffer.getChannelData(0);
-              const pcmBlob = createBlob(inputData);
-              
-              // Safe execution of session send
-              if (sessionPromise) {
-                  sessionPromise.then(session => {
-                    try {
-                        session.sendRealtimeInput({ media: pcmBlob });
-                    } catch (err) {
-                        console.warn("Failed to send audio chunk", err);
-                    }
-                  }).catch(e => {
-                     // Suppress unhandled rejections from sessionPromise if connection failed
-                     // The error is already handled by 'onerror' callback
-                  });
-              }
-            };
-            
-            source.connect(scriptProcessor);
-            scriptProcessor.connect(inputCtx.destination);
+            try {
+                const source = inputCtx.createMediaStreamSource(stream);
+                const scriptProcessor = inputCtx.createScriptProcessor(2048, 1, 1);
+                
+                scriptProcessor.onaudioprocess = (e) => {
+                  if (!isActiveRef.current) return; // Use Ref for synchronous check
+                  
+                  const inputData = e.inputBuffer.getChannelData(0);
+                  const pcmBlob = createBlob(inputData);
+                  
+                  // Safe execution of session send
+                  if (sessionPromise) {
+                      sessionPromise.then(session => {
+                        try {
+                            session.sendRealtimeInput({ media: pcmBlob });
+                        } catch (err) {
+                            console.warn("Failed to send audio chunk", err);
+                        }
+                      }).catch(e => {
+                         // Suppress unhandled rejections from sessionPromise if connection failed
+                         // The error is already handled by 'onerror' callback
+                      });
+                  }
+                };
+                
+                source.connect(scriptProcessor);
+                scriptProcessor.connect(inputCtx.destination);
+            } catch (audioErr) {
+                console.error("Audio pipeline error", audioErr);
+                setError("Failed to start audio pipeline.");
+            }
           },
           onmessage: async (message: LiveServerMessage) => {
             // Handle Transcription
@@ -230,17 +255,19 @@ const LivePractice: React.FC<LivePracticeProps> = ({ lesson, weekId, weekTheme, 
             console.error("Session Error", err);
             let errorMsg = "Connection disrupted. Please check your internet or try again.";
             
-            // Handle specific error codes/messages if available
-            if (err && typeof err === 'object') {
-                const msg = (err.message || JSON.stringify(err)).toLowerCase();
+            // Enhanced Error Handling
+            if (err && (err.message || err.toString())) {
+                const msg = (err.message || err.toString()).toLowerCase();
                 if (msg.includes('503') || msg.includes('unavailable')) {
                     errorMsg = "Service unavailable (High Traffic). Please try again in a moment.";
-                } else if (msg.includes('network') || msg.includes('fetch')) {
-                    errorMsg = "Network error detected. Please check your connection.";
+                } else if (msg.includes('network') || msg.includes('fetch') || msg.includes('failed to fetch')) {
+                    errorMsg = "Network Error: Unable to connect. Please check your internet or API Key.";
                 } else if (msg.includes('notallowed') || msg.includes('permission denied')) {
                     errorMsg = "Microphone access denied. Please enable permissions.";
                 } else if (msg.includes('notfound')) {
                     errorMsg = "No microphone found. Please check your devices.";
+                } else if (msg.includes('api key')) {
+                    errorMsg = "Invalid API Key. Please verify your settings.";
                 }
             }
             
@@ -279,7 +306,7 @@ COACHING STYLE:
 CONVERSATION DESIGN RULES:
 1) ASK → when user gives short replies
 2) FOLLOW-UP → when user reveals something meaningful
-3) DEEPEN → when user stays surface-level
+3) DEEPEN → when user generalizes
 4) CHALLENGE (POLITE) → when user generalizes
 5) AFFIRM → when user seems unsure
 6) REDIRECT → when conversation derails
@@ -304,7 +331,11 @@ Treat the user's first input as a response to this. Do not repeat the greeting.`
       // Catch initial connection failures to prevent unhandled rejections
       sessionPromise.catch(err => {
          console.error("Initial connection failed", err);
-         // onError will likely be triggered by the SDK, but this is a safety net
+         // The error will often be caught by onerror as well, but this handles the promise rejection
+         if (!isActiveRef.current) {
+             setError("Failed to establish connection to Gemini Live.");
+             setIsConnecting(false);
+         }
       });
 
     } catch (err: any) {
@@ -346,11 +377,16 @@ Treat the user's first input as a response to this. Do not repeat the greeting.`
       await outputAudioContextRef.current.close();
     }
     
-    // Close Gemini Live Session if possible
+    // 2. Close Gemini Live Session
+    if (sessionRef.current) {
+      sessionRef.current.then(session => session.close()).catch(e => console.log("Session already closed"));
+      sessionRef.current = null;
+    }
+
     setIsActive(false);
     isActiveRef.current = false;
     
-    // 2. Generate Analysis
+    // 3. Generate Analysis
     analyzeSession();
   };
 
@@ -567,6 +603,9 @@ Treat the user's first input as a response to this. Do not repeat the greeting.`
       if (outputAudioContextRef.current && outputAudioContextRef.current.state !== 'closed') {
         outputAudioContextRef.current.close();
       }
+      if (sessionRef.current) {
+         sessionRef.current.then(s => s.close()).catch(() => {});
+      }
       setIsActive(false);
       isActiveRef.current = false;
     };
@@ -584,7 +623,8 @@ Treat the user's first input as a response to this. Do not repeat the greeting.`
 
   const retryConnection = () => {
     // Basic retry logic
-    startSession();
+    setIsConnecting(false);
+    setTimeout(() => startSession(), 100);
   };
 
   return (
@@ -599,7 +639,7 @@ Treat the user's first input as a response to this. Do not repeat the greeting.`
            </p>
         </div>
         <div className="flex items-center gap-2">
-            {!sessionResult && !isActive && !isConnecting && (
+            {!sessionResult && !isConnecting && (
                 <button 
                   onClick={() => setShowSettings(!showSettings)}
                   className={`p-3 rounded-full transition-colors ${showSettings ? 'bg-deep-brown text-white' : 'hover:bg-mist text-warm-gray'}`}
@@ -628,14 +668,15 @@ Treat the user's first input as a response to this. Do not repeat the greeting.`
              </h3>
              
              {/* Voice Selection */}
-             <div className="mb-4">
+             <div className={`mb-4 ${isActive ? 'opacity-50 pointer-events-none' : ''}`}>
                <label className="text-xs font-bold text-warm-gray uppercase tracking-wider mb-2 block flex items-center gap-1">
-                 <Mic className="w-3 h-3" /> AI Voice
+                 <Mic className="w-3 h-3" /> AI Voice {isActive && <span className="text-[10px] lowercase italic">(locked during session)</span>}
                </label>
                <div className="space-y-2">
                  {AVAILABLE_VOICES.map(voice => (
                    <button
                      key={voice.id}
+                     disabled={isActive}
                      onClick={() => setSelectedVoice(voice.id)}
                      className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between border ${
                        selectedVoice === voice.id 
@@ -735,31 +776,55 @@ Treat the user's first input as a response to this. Do not repeat the greeting.`
                     <style>{`.mask-linear-gradient { mask-image: linear-gradient(to bottom, transparent 0%, black 20%); }`}</style>
                     {/* Render History */}
                     {transcript.slice(-3).map((t, i) => (
-                      <div key={`hist-${i}`} className="flex flex-col items-center animate-in slide-in-from-bottom-4 fade-in duration-500 w-full">
-                          <div className={`max-w-[90%] md:max-w-[80%] p-3 rounded-2xl text-sm md:text-lg font-medium shadow-sm backdrop-blur-sm break-words border text-center ${
+                      <div key={`hist-${i}`} className="w-full flex justify-center animate-slideUpFade">
+                          <div className={`relative max-w-[90%] md:max-w-[80%] p-4 rounded-2xl text-sm md:text-lg font-medium shadow-md backdrop-blur-md border flex flex-col items-center gap-2 ${
                               t.role === 'model' 
-                              ? 'bg-white/95 border-warm-beige text-deep-brown' 
-                              : 'bg-deep-brown/95 border-transparent text-white'
+                              ? 'bg-white/90 border-eucalyptus/30 text-deep-brown' 
+                              : 'bg-deep-brown/90 border-apricot/30 text-warm-beige'
                           }`}>
-                            <div className={`text-[9px] md:text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center justify-center gap-1 ${t.role === 'model' ? 'text-eucalyptus' : 'text-apricot'}`}>
-                                {t.role === 'model' ? 'Nu' : 'You'}
+                            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest opacity-80">
+                                {t.role === 'model' ? (
+                                    <>
+                                        <Sparkles className="w-3 h-3 text-eucalyptus" />
+                                        <span className="text-eucalyptus">Nu</span>
+                                    </>
+                                ) : (
+                                    <>
+                                         <span className="text-apricot">You</span>
+                                         <User className="w-3 h-3 text-apricot" />
+                                    </>
+                                )}
                             </div>
-                            {t.text}
+                            <p className="text-center leading-relaxed">
+                                {t.text}
+                            </p>
                           </div>
                       </div>
                     ))}
                     {/* Streaming Text */}
                     {streamingText && (
-                       <div className="flex flex-col items-center animate-pulse w-full">
-                          <div className={`max-w-[90%] md:max-w-[80%] p-3 rounded-2xl text-sm md:text-lg font-medium shadow-sm backdrop-blur-sm break-words border text-center ${
+                       <div className="w-full flex justify-center animate-pulse">
+                          <div className={`relative max-w-[90%] md:max-w-[80%] p-4 rounded-2xl text-sm md:text-lg font-medium shadow-md backdrop-blur-md border flex flex-col items-center gap-2 ${
                               streamingText.role === 'model' 
-                              ? 'bg-white/95 border-warm-beige text-deep-brown' 
-                              : 'bg-deep-brown/95 border-transparent text-white'
+                              ? 'bg-white/90 border-eucalyptus/30 text-deep-brown' 
+                              : 'bg-deep-brown/90 border-apricot/30 text-warm-beige'
                           }`}>
-                            <div className={`text-[9px] md:text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center justify-center gap-1 ${streamingText.role === 'model' ? 'text-eucalyptus' : 'text-apricot'}`}>
-                                {streamingText.role === 'model' ? 'Nu' : 'You'}
+                            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest opacity-80">
+                                {streamingText.role === 'model' ? (
+                                    <>
+                                        <Sparkles className="w-3 h-3 text-eucalyptus" />
+                                        <span className="text-eucalyptus">Nu</span>
+                                    </>
+                                ) : (
+                                    <>
+                                         <span className="text-apricot">You</span>
+                                         <User className="w-3 h-3 text-apricot" />
+                                    </>
+                                )}
                             </div>
-                            {streamingText.text} <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-1 align-middle opacity-50 rounded-full"></span>
+                            <p className="text-center leading-relaxed">
+                                {streamingText.text} <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-1 align-middle opacity-50 rounded-full"></span>
+                            </p>
                           </div>
                        </div>
                     )}
