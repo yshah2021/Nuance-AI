@@ -4,7 +4,7 @@ import { HashRouter as Router, Routes, Route, Link, useLocation } from 'react-ro
 import { UserState, SessionResult, Lesson, WeekPlan, User, UserRole, AdaptiveDrill } from './types';
 import { WEEKLY_PLANS, MOCK_RECENT_SESSIONS, MOCK_LONG_TERM_HISTORY } from './constants';
 import { BarChart, Bar, ResponsiveContainer, XAxis, Tooltip } from 'recharts';
-import { Mic2, LayoutDashboard, BookOpen, Award, ChevronRight, Play, Lock, X, Target, CheckCircle, Info, Sparkles, ChevronDown, ChevronUp, Palette, LogOut, Star, Map, Dumbbell } from 'lucide-react';
+import { Mic2, LayoutDashboard, BookOpen, Award, ChevronRight, Play, Lock, X, Target, CheckCircle, Info, Sparkles, ChevronDown, ChevronUp, Palette, LogOut, Star, Dumbbell } from 'lucide-react';
 import LivePractice from './components/LivePractice';
 import SessionFeedback from './components/SessionFeedback';
 import ProgressAnalytics from './components/ProgressAnalytics';
@@ -13,6 +13,7 @@ import Login from './components/Login';
 import Pricing from './components/Pricing';
 import Roadmap from './components/Roadmap';
 import AdaptivePractice from './components/AdaptivePractice';
+import RestrictedAccess from './components/RestrictedAccess';
 
 // --- Logic Helpers ---
 
@@ -36,7 +37,6 @@ export const Navigation = ({ user, onLogout, onShowPricing }: { user: User, onLo
     { icon: Dumbbell, label: 'Daily Mix', path: '/adaptive' },
     { icon: BookOpen, label: 'Curriculum', path: '/curriculum' },
     { icon: Award, label: 'Progress', path: '/progress' },
-    { icon: Map, label: 'Roadmap', path: '/roadmap' },
   ];
 
   return (
@@ -461,7 +461,7 @@ const App = () => {
             <Route path="/adaptive" element={<AdaptivePractice userState={userState} onStartDrill={handleStartAdaptiveDrill} />} />
             <Route path="/curriculum" element={<Curriculum userState={userState} user={user} onPreview={handlePreviewLesson} onShowPricing={() => setShowPricing(true)} />} />
             <Route path="/progress" element={<ProgressAnalytics history={userState.sessionHistory} />} />
-            <Route path="/roadmap" element={<Roadmap />} />
+            <Route path="/roadmap" element={user.role === 'admin' ? <Roadmap /> : <RestrictedAccess />} />
             <Route path="/design" element={<DesignSystem />} />
           </Routes>
         </main>

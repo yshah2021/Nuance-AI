@@ -86,7 +86,7 @@ export const generateDailyPlan = async (history: SessionResult[]): Promise<Adapt
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -117,7 +117,9 @@ export const generateDailyPlan = async (history: SessionResult[]): Promise<Adapt
       }
     });
 
-    const planData = JSON.parse(response.text);
+    const rawText = response.text || "{}";
+    const cleanedText = rawText.replace(/```(?:json)?\s*([\s\S]*?)\s*```/i, '$1').trim();
+    const planData = JSON.parse(cleanedText);
 
     return {
       date: new Date().toISOString(),
