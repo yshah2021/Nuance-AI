@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { HashRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { UserState, SessionResult, Lesson, WeekPlan, User, UserRole, AdaptiveDrill } from './types';
 import { WEEKLY_PLANS, MOCK_RECENT_SESSIONS, MOCK_LONG_TERM_HISTORY } from './constants';
 import { BarChart, Bar, ResponsiveContainer, XAxis, Tooltip } from 'recharts';
@@ -13,7 +13,6 @@ import Login from './components/Login';
 import Pricing from './components/Pricing';
 import Roadmap from './components/Roadmap';
 import AdaptivePractice from './components/AdaptivePractice';
-import RestrictedAccess from './components/RestrictedAccess';
 
 // --- Logic Helpers ---
 
@@ -461,7 +460,7 @@ const App = () => {
             <Route path="/adaptive" element={<AdaptivePractice userState={userState} onStartDrill={handleStartAdaptiveDrill} />} />
             <Route path="/curriculum" element={<Curriculum userState={userState} user={user} onPreview={handlePreviewLesson} onShowPricing={() => setShowPricing(true)} />} />
             <Route path="/progress" element={<ProgressAnalytics history={userState.sessionHistory} />} />
-            <Route path="/roadmap" element={user.role === 'admin' ? <Roadmap /> : <RestrictedAccess />} />
+            <Route path="/roadmap" element={user.role === 'admin' ? <Roadmap /> : <Navigate to="/" replace />} />
             <Route path="/design" element={<DesignSystem />} />
           </Routes>
         </main>
